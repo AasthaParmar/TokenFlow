@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TokenFlow Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #0f172a; color: #e2e8f0; }
+    h1 { margin-bottom: 0.25rem; }
+    .subtitle { color: #94a3b8; margin-bottom: 2rem; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .card { background: #1e293b; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid #334155; }
+    .card .label { color: #94a3b8; font-size: 0.85rem; }
+    .card .value { font-size: 1.75rem; font-weight: 700; margin-top: 0.25rem; }
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    .panel { background: #1e293b; padding: 1rem; border-radius: 12px; border: 1px solid #334155; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #334155; }
+    .error { color: #f87171; }
+  </style>
+</head>
+<body>
+  <h1>TokenFlow</h1>
+  <p class="subtitle">Benchmark results dashboard</p>
+
+  <div class="cards" id="cards"></div>
+  <div class="charts">
+    <div class="panel"><canvas id="tokensChart"></canvas></div>
+    <div class="panel"><canvas id="latencyChart"></canvas></div>
+  </div>
+  <div class="panel" style="margin-top: 1.5rem;">
+    <h3>Cache Threshold Sweep</h3>
+    <table id="cacheTable"><thead><tr><th>Threshold</th><th>Hit Rate</th><th>Correct Hits</th></tr></thead><tbody></tbody></table>
+  </div>
+  <p id="status" class="error"></p>
+
+  <script>
+    async function loadJson(path) {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error(`Failed to load ${path}`);
+      return res.json();
+    }
+
+    function renderCards(latest, judge) {
+      const totalTokens = latest.total_input_tokens + latest.total_output_tokens;
+      const avgLatency = latest.total_latency_ms / Math.max(latest.total_questions, 1);
+      const hitRate = latest.cache_hits / Math.max(latest.total_questions, 1) * 100;
+      const quality = judge ? judge.avg_overall_pct : 100;
+
+      document.getElementById('cards').innerHTML = [
+        ['Mode', latest.mode],
+        ['Questions', latest.total_questions],
+        ['Total Tokens', totalTokens],
+        ['Avg Latency (ms)', avgLatency.toFixed(0)],
+        ['Cache Hit Rate', hitRate.toFixed(1) + '%'],
+        ['Quality Score', quality.toFixed(1) + '%'],
+      ].map(([label, value]) => `
+        <div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>
+      `).join('');
+    }
+
+    function renderCharts(latest) {
+      const labels = ['Input Tokens', 'Output Tokens', 'LLM Calls', 'Cache Hits'];
+      const data = [latest.total_input_tokens, latest.total_output_tokens, latest.llm_calls, latest.cache_hits];
+
+      new Chart(document.getElementById('tokensChart'), {
+        type: 'bar',
+        data: { labels, datasets: [{ label: latest.mode, data, backgroundColor: '#38bdf8' }] },
+        options: { plugins: { title: { display: true, text: 'TokenFlow Metrics', color: '#e2e8f0' } }, scales: { x: { ticks: { color: '#94a3b8' } }, y: { ticks: { color: '#94a3b8' } } } }
+      });
+
+      new Chart(document.getElementById('latencyChart'), {
+        type: 'doughnut',
+        data: {
+          labels: ['LLM Calls', 'Cache Hits'],
+          datasets: [{ data: [latest.llm_calls, latest.cache_hits], backgroundColor: ['#818cf8', '#34d399'] }]
+        },
+        options: { plugins: { title: { display: true, text: 'LLM vs Cache', color: '#e2e8f0' } } }
+      });
+    }
+
+    function renderCacheTable(audit) {
+      const tbody = document.querySelector('#cacheTable tbody');
+      tbody.innerHTML = (audit.thresholds || []).map(row => `
+        <tr>
+          <td>${row.threshold}</td>
+          <td>${row.cache_hit_rate}%</td>
+          <td>${row.correct_hit_rate}%</td>
+        </tr>
+      `).join('');
+    }
+
+    async function init() {
+      try {
+        const latest = await loadJson('/dashboard/data/latest.json');
+        let judge = null;
+        try { judge = await loadJson('/dashboard/data/judge_latest.json'); } catch (_) {}
+        let audit = null;
+        try { audit = await loadJson('/dashboard/data/cache_audit.json'); } catch (_) {}
+
+        renderCards(latest, judge);
+        renderCharts(latest);
+        if (audit) renderCacheTable(audit);
+      } catch (err) {
+        document.getElementById('status').textContent =
+          'No results yet. Run: python -m evaluation.benchmark --mode baseline --limit 5';
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

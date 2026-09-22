@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 
 from backend.config import settings
 from backend.gateway.pipeline import GatewayPipeline, PipelineConfig
@@ -94,3 +96,22 @@ def chat_optimized(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Gemini API error: {exc}") from exc
+
+
+@app.get("/dashboard")
+def dashboard():
+    index = Path("dashboard/index.html")
+    if not index.exists():
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    return FileResponse(index)
+
+
+@app.get("/dashboard/data/{name}")
+def dashboard_data(name: str):
+    allowed = {"latest.json", "judge_latest.json", "cache_audit.json"}
+    if name not in allowed:
+        raise HTTPException(status_code=404, detail="Unknown data file")
+    path = Path("evaluation/results") / name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Results not found")
+    return FileResponse(path, media_type="application/json")
