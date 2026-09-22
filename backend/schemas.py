@@ -11,3 +11,6 @@ class ChatResponse(BaseModel):
     input_tokens: int
     output_tokens: int
     latency_ms: float
+    cache_hit: bool = False
+    similarity_score: float | None = None
+    matched_question: str | None = None
