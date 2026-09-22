@@ -18,3 +18,4 @@ class ChatResponse(BaseModel):
     matched_question: str | None = None
     chunks_in: int = 0
     chunks_kept: int = 0
+    complexity_score: float | None = None

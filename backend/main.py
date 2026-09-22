@@ -7,6 +7,7 @@ from backend.config import settings
 from backend.llm.gemini import GeminiClient
 from backend.logging.metrics import log_request
 from backend.rag.selector import RAGSelector
+from backend.router.complexity import route
 from backend.schemas import ChatRequest, ChatResponse
 from database.models import cache_count, init_db
 
@@ -56,7 +57,7 @@ def config_flags() -> dict[str, bool]:
     return {
         "enable_cache": settings.enable_cache,
         "enable_rag_selection": settings.enable_rag_selection,
-        "enable_routing": False,
+        "enable_routing": settings.enable_routing,
     }
 
 
@@ -98,6 +99,7 @@ def log_chat(
             "chunks_in": response.chunks_in,
             "chunks_kept": response.chunks_kept,
             "recall": recall,
+            "complexity_score": response.complexity_score,
             "config_flags": flags,
         }
     )
@@ -140,8 +142,15 @@ def chat(request: ChatRequest):
             log_chat(request, response, flags, recall)
             return response
 
+    complexity_score = None
+    model = settings.gemini_model_large
+    if settings.enable_routing:
+        decision = route(request.message, num_chunks=chunks_kept)
+        model = decision.model
+        complexity_score = decision.complexity_score
+
     try:
-        result = get_client().generate(request.message, context=context)
+        result = get_client().generate(request.message, model=model, context=context)
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -157,6 +166,7 @@ def chat(request: ChatRequest):
         cache_hit=False,
         chunks_in=chunks_in,
         chunks_kept=chunks_kept,
+        complexity_score=complexity_score,
     )
     log_chat(request, response, flags, recall)
     return response
