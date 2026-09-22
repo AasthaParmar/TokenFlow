@@ -186,9 +186,3 @@ TokenFlow/
 ├── tests/            # Unit tests
 └── docker-compose.yml
 ```
-
-## Resume claim template
-
-> Built TokenFlow, a Gemini-powered LLM efficiency gateway that reduced input tokens by X% while maintaining Y% answer quality on a 30-question held-out benchmark, using semantic caching, RAG context selection, and model routing.
-
-Replace X and Y with your actual `evaluation/results/REPORT.md` numbers.
