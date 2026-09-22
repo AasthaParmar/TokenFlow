@@ -65,3 +65,9 @@ def find_similar_cache(embedding: list[float], threshold: float) -> dict | None:
             if row and row["similarity"] >= threshold:
                 return dict(row)
     return None
+
+
+def clear_cache() -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("TRUNCATE cache_entries")
