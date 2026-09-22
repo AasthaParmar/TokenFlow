@@ -1,10 +1,27 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 
 from backend.llm.gemini import GeminiClient
 from backend.logging.metrics import log_request
 from backend.schemas import ChatRequest, ChatResponse
+from database.models import cache_count, init_db
 
-app = FastAPI(title="TokenFlow", description="LLM efficiency gateway")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        init_db()
+    except Exception:
+        pass
+    yield
+
+
+app = FastAPI(
+    title="TokenFlow",
+    description="LLM efficiency gateway",
+    lifespan=lifespan,
+)
 
 _client: GeminiClient | None = None
 
@@ -19,6 +36,15 @@ def get_client() -> GeminiClient:
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "tokenflow"}
+
+
+@app.get("/cache/stats")
+def cache_stats():
+    try:
+        count = cache_count()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Database unavailable: {exc}") from exc
+    return {"cache_entries": count}
 
 
 @app.post("/chat", response_model=ChatResponse)
