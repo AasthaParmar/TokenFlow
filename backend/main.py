@@ -82,6 +82,8 @@ def chat(request: ChatRequest):
         return get_pipeline().run(request, baseline_config())
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Gemini API error: {exc}") from exc
 
 
 @app.post("/chat/optimized", response_model=ChatResponse)
@@ -90,3 +92,5 @@ def chat_optimized(request: ChatRequest):
         return get_pipeline().run(request, optimized_config())
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Gemini API error: {exc}") from exc

@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS cache_entries (
     id SERIAL PRIMARY KEY,
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
-    embedding vector(768) NOT NULL,
+    embedding vector(3072) NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
