@@ -6,6 +6,7 @@ from backend.cache.semantic import SemanticCache
 from backend.config import settings
 from backend.llm.gemini import GeminiClient
 from backend.logging.metrics import log_request
+from backend.rag.selector import RAGSelector
 from backend.schemas import ChatRequest, ChatResponse
 from database.models import cache_count, init_db
 
@@ -27,6 +28,7 @@ app = FastAPI(
 
 _client: GeminiClient | None = None
 _cache: SemanticCache | None = None
+_rag: RAGSelector | None = None
 
 
 def get_client() -> GeminiClient:
@@ -43,12 +45,62 @@ def get_cache() -> SemanticCache:
     return _cache
 
 
+def get_rag() -> RAGSelector:
+    global _rag
+    if _rag is None:
+        _rag = RAGSelector(get_client())
+    return _rag
+
+
 def config_flags() -> dict[str, bool]:
     return {
         "enable_cache": settings.enable_cache,
-        "enable_rag_selection": False,
+        "enable_rag_selection": settings.enable_rag_selection,
         "enable_routing": False,
     }
+
+
+def prepare_context(request: ChatRequest) -> tuple[str | None, int, int, float | None]:
+    chunks = request.context_chunks
+    if not chunks:
+        return None, 0, 0, None
+
+    if settings.enable_rag_selection:
+        rag_result = get_rag().select(
+            request.message,
+            chunks,
+            request.relevant_chunk_ids,
+        )
+        context = "\n\n".join(rag_result.selected_chunks) if rag_result.selected_chunks else None
+        return context, rag_result.chunks_in, rag_result.chunks_kept, rag_result.recall
+
+    context = "\n\n".join(chunks)
+    return context, len(chunks), len(chunks), None
+
+
+def log_chat(
+    request: ChatRequest,
+    response: ChatResponse,
+    flags: dict[str, bool],
+    recall: float | None = None,
+) -> None:
+    log_request(
+        {
+            "question": request.message,
+            "answer": response.answer,
+            "model": response.model,
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+            "latency_ms": response.latency_ms,
+            "cache_hit": response.cache_hit,
+            "similarity_score": response.similarity_score,
+            "matched_question": response.matched_question,
+            "chunks_in": response.chunks_in,
+            "chunks_kept": response.chunks_kept,
+            "recall": recall,
+            "config_flags": flags,
+        }
+    )
 
 
 @app.get("/health")
@@ -68,6 +120,7 @@ def cache_stats():
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     flags = config_flags()
+    context, chunks_in, chunks_kept, recall = prepare_context(request)
 
     if settings.enable_cache:
         cache_result = get_cache().lookup(request.message)
@@ -81,25 +134,14 @@ def chat(request: ChatRequest):
                 cache_hit=True,
                 similarity_score=cache_result.similarity_score,
                 matched_question=cache_result.matched_question,
+                chunks_in=chunks_in,
+                chunks_kept=chunks_kept,
             )
-            log_request(
-                {
-                    "question": request.message,
-                    "answer": response.answer,
-                    "model": response.model,
-                    "input_tokens": response.input_tokens,
-                    "output_tokens": response.output_tokens,
-                    "latency_ms": response.latency_ms,
-                    "cache_hit": True,
-                    "similarity_score": cache_result.similarity_score,
-                    "matched_question": cache_result.matched_question,
-                    "config_flags": flags,
-                }
-            )
+            log_chat(request, response, flags, recall)
             return response
 
     try:
-        result = get_client().generate(request.message)
+        result = get_client().generate(request.message, context=context)
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -113,19 +155,8 @@ def chat(request: ChatRequest):
         output_tokens=result.output_tokens,
         latency_ms=result.latency_ms,
         cache_hit=False,
+        chunks_in=chunks_in,
+        chunks_kept=chunks_kept,
     )
-
-    log_request(
-        {
-            "question": request.message,
-            "answer": response.answer,
-            "model": response.model,
-            "input_tokens": response.input_tokens,
-            "output_tokens": response.output_tokens,
-            "latency_ms": response.latency_ms,
-            "cache_hit": False,
-            "config_flags": flags,
-        }
-    )
-
+    log_chat(request, response, flags, recall)
     return response
