@@ -50,9 +50,10 @@ If port `5432` is already in use on your Mac, either stop the other Postgres or 
 ### 4. Generate evaluation dataset (first time)
 
 ```bash
-python -m evaluation.generate_dataset
-python -c "from evaluation.splits import ensure_splits; ensure_splits()"
+python -m evaluation.generate_dataset --size 500 --write-splits
 ```
+
+Default size is **500** with a balanced mix (~35% factual, ~25% reasoning, ~25% RAG, ~15% cache paraphrases for semantic cache). Re-run with `--write-splits` whenever you change `--size`.
 
 ### 5. Run the server
 
@@ -154,8 +155,8 @@ python -m evaluation.report
 
 ### Dev vs test split
 
-- **120 dev questions** — tune thresholds here
-- **30 test questions** — held-out set for final resume numbers only
+- **80% dev** — tune thresholds here (e.g. 240 questions at size 300)
+- **20% test** — held-out set for final resume numbers only (e.g. 60 at size 300)
 
 Judge validated on 20 randomly sampled dev questions (`evaluation/results/manual_validation_sample.json`).
 

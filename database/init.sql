@@ -8,6 +8,5 @@ CREATE TABLE IF NOT EXISTS cache_entries (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS cache_entries_embedding_idx
-    ON cache_entries
-    USING hnsw (embedding vector_cosine_ops);
+-- Gemini embeddings are 3072-d; pgvector HNSW indexes cap at 2000-d.
+-- Semantic search still works without an index at dev/eval scale.
