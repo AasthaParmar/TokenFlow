@@ -98,6 +98,14 @@ def chat_optimized(request: ChatRequest):
         raise HTTPException(status_code=502, detail=f"Gemini API error: {exc}") from exc
 
 
+@app.get("/chat-ui")
+def chat_ui():
+    index = Path("chat/index.html")
+    if not index.exists():
+        raise HTTPException(status_code=404, detail="Chat UI not found")
+    return FileResponse(index)
+
+
 @app.get("/dashboard")
 def dashboard():
     index = Path("dashboard/index.html")

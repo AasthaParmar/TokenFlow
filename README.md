@@ -50,16 +50,18 @@ If port `5432` is already in use on your Mac, either stop the other Postgres or 
 ### 4. Generate evaluation dataset (first time)
 
 ```bash
-python -m evaluation.generate_dataset --size 500 --write-splits
+python -m evaluation.generate_dataset --size 1000 --write-splits
 ```
 
-Default size is **500** with a balanced mix (~35% factual, ~25% reasoning, ~25% RAG, ~15% cache paraphrases for semantic cache). Re-run with `--write-splits` whenever you change `--size`.
+Default size is **1000** with a balanced mix (~35% factual, ~25% reasoning, ~25% RAG, ~15% cache paraphrases). Every row has a **unique question string**; similarity is intentional only in `cache_pair` items. Re-run with `--write-splits` whenever you change `--size`.
 
 ### 5. Run the server
 
 ```bash
 uvicorn backend.main:app --reload --port 8000
 ```
+
+Open **http://localhost:8000/chat-ui** to try questions in the browser (optional RAG context chunks in the sidebar).
 
 ### 6. Health check
 
@@ -76,6 +78,7 @@ curl http://localhost:8000/health
 | `POST /chat/optimized` | Full pipeline (respects feature flags in `.env`) |
 | `GET /config` | Current feature flags and model names |
 | `GET /cache/stats` | Number of cached entries |
+| `GET /chat-ui` | Simple browser chat (baseline or optimized) |
 | `GET /dashboard` | Results dashboard |
 
 ## Example requests

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TokenFlow Chat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      background: #0f172a;
+      color: #e2e8f0;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #334155;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem;
+    }
+    header h1 { margin: 0; font-size: 1.25rem; }
+    header a { color: #38bdf8; text-decoration: none; font-size: 0.9rem; }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-left: auto;
+      flex-wrap: wrap;
+    }
+    label.mode {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 0;
+      min-height: 0;
+    }
+    @media (max-width: 768px) {
+      main { grid-template-columns: 1fr; }
+      aside { border-top: 1px solid #334155; }
+    }
+    #messages {
+      padding: 1.5rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .bubble {
+      max-width: 85%;
+      padding: 0.75rem 1rem;
+      border-radius: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .bubble.user {
+      align-self: flex-end;
+      background: #1d4ed8;
+      color: #fff;
+    }
+    .bubble.assistant {
+      align-self: flex-start;
+      background: #1e293b;
+      border: 1px solid #334155;
+    }
+    .meta {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-top: 0.5rem;
+    }
+    .meta span { margin-right: 0.75rem; }
+    .cache-hit { color: #34d399; }
+    aside {
+      padding: 1rem;
+      background: #1e293b;
+      border-left: 1px solid #334155;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    aside label { font-size: 0.85rem; color: #94a3b8; }
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 0.5rem;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: inherit;
+      font-size: 0.85rem;
+      resize: vertical;
+    }
+    footer {
+      padding: 1rem 1.5rem;
+      border-top: 1px solid #334155;
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-end;
+    }
+    #prompt {
+      flex: 1;
+      min-height: 48px;
+      max-height: 160px;
+      padding: 0.75rem 1rem;
+      border-radius: 12px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #e2e8f0;
+      font-family: inherit;
+      font-size: 1rem;
+      resize: none;
+    }
+    button {
+      padding: 0.75rem 1.25rem;
+      border-radius: 12px;
+      border: none;
+      background: #38bdf8;
+      color: #0f172a;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error { color: #f87171; font-size: 0.9rem; padding: 0 1.5rem 1rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TokenFlow Chat</h1>
+    <div class="controls">
+      <a href="/dashboard">Dashboard</a>
+      <label class="mode">
+        <input type="radio" name="mode" value="optimized" checked />
+        Optimized
+      </label>
+      <label class="mode">
+        <input type="radio" name="mode" value="baseline" />
+        Baseline
+      </label>
+    </div>
+  </header>
+
+  <main>
+    <div id="messages" aria-live="polite"></div>
+    <aside>
+      <label for="context">RAG context (one chunk per line, optional)</label>
+      <textarea id="context" placeholder="Paste doc snippets here…"></textarea>
+      <p class="meta" id="configHint">Loading config…</p>
+    </aside>
+  </main>
+
+  <p class="error" id="error" hidden></p>
+
+  <footer>
+    <textarea id="prompt" rows="1" placeholder="Ask a question…" aria-label="Message"></textarea>
+    <button type="button" id="send">Send</button>
+  </footer>
+
+  <script>
+    const messagesEl = document.getElementById('messages');
+    const promptEl = document.getElementById('prompt');
+    const contextEl = document.getElementById('context');
+    const sendBtn = document.getElementById('send');
+    const errorEl = document.getElementById('error');
+    const configHint = document.getElementById('configHint');
+
+    function mode() {
+      return document.querySelector('input[name="mode"]:checked').value;
+    }
+
+    function appendBubble(role, text, metaHtml) {
+      const wrap = document.createElement('div');
+      wrap.className = 'bubble ' + role;
+      wrap.textContent = text;
+      if (metaHtml) {
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.innerHTML = metaHtml;
+        wrap.appendChild(meta);
+      }
+      messagesEl.appendChild(wrap);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function formatMeta(data) {
+      const parts = [
+        `<span>model: ${data.model}</span>`,
+        `<span>in: ${data.input_tokens} / out: ${data.output_tokens}</span>`,
+        `<span>${Math.round(data.latency_ms)} ms</span>`,
+      ];
+      if (data.cache_hit) {
+        parts.push(`<span class="cache-hit">cache hit</span>`);
+        if (data.similarity_score != null) {
+          parts.push(`<span>sim: ${data.similarity_score.toFixed(3)}</span>`);
+        }
+      }
+      if (data.chunks_in > 0) {
+        parts.push(`<span>RAG: ${data.chunks_kept}/${data.chunks_in} chunks</span>`);
+      }
+      return parts.join('');
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/config');
+        const c = await res.json();
+        configHint.textContent =
+          `Flags: cache=${c.enable_cache}, rag=${c.enable_rag_selection}, routing=${c.enable_routing}, top-k=${c.rag_top_k}`;
+      } catch {
+        configHint.textContent = 'Could not load /config';
+      }
+    }
+
+    async function send() {
+      const message = promptEl.value.trim();
+      if (!message) return;
+
+      const chunks = contextEl.value
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      errorEl.hidden = true;
+      sendBtn.disabled = true;
+      appendBubble('user', message);
+
+      promptEl.value = '';
+      promptEl.style.height = 'auto';
+
+      const path = mode() === 'baseline' ? '/chat' : '/chat/optimized';
+      const body = { message };
+      if (chunks.length) body.context_chunks = chunks;
+
+      try {
+        const res = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const d = data.detail;
+          throw new Error(typeof d === 'string' ? d : JSON.stringify(d) || res.statusText);
+        }
+        appendBubble('assistant', data.answer, formatMeta(data));
+      } catch (err) {
+        errorEl.textContent = String(err.message || err);
+        errorEl.hidden = false;
+      } finally {
+        sendBtn.disabled = false;
+        promptEl.focus();
+      }
+    }
+
+    sendBtn.addEventListener('click', send);
+    promptEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+    promptEl.addEventListener('input', () => {
+      promptEl.style.height = 'auto';
+      promptEl.style.height = Math.min(promptEl.scrollHeight, 160) + 'px';
+    });
+
+    loadConfig();
+  </script>
+</body>
+</html>
