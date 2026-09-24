@@ -7,24 +7,57 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body { font-family: system-ui, sans-serif; margin: 2rem; background: #0f172a; color: #e2e8f0; }
-    h1 { margin-bottom: 0.25rem; }
+    .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.25rem;
+    }
+    h1 { margin: 0; }
     .subtitle { color: #94a3b8; margin-bottom: 2rem; }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
     .card { background: #1e293b; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid #334155; }
     .card .label { color: #94a3b8; font-size: 0.85rem; }
     .card .value { font-size: 1.75rem; font-weight: 700; margin-top: 0.25rem; }
+    .card .value.positive { color: #34d399; }
+    .card .value.muted { color: #94a3b8; font-size: 1rem; font-weight: 500; }
+    .comparison-table th { color: #94a3b8; font-weight: 600; }
     .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
     .panel { background: #1e293b; padding: 1rem; border-radius: 12px; border: 1px solid #334155; }
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
     th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #334155; }
     .error { color: #f87171; }
+    .title-row a { color: #38bdf8; text-decoration: none; font-size: 0.9rem; }
+    .title-row a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
-  <h1>TokenFlow</h1>
+  <div class="title-row">
+    <h1>TokenFlow</h1>
+    <a href="/chat-ui">Chat</a>
+  </div>
   <p class="subtitle">Benchmark results dashboard</p>
 
   <div class="cards" id="cards"></div>
+  <div class="panel" id="comparisonPanel" style="margin-bottom: 1.5rem; display: none;">
+    <h3 style="margin-top: 0;">Baseline vs Combined (test set)</h3>
+    <p id="comparisonNote" class="subtitle" style="margin: 0 0 1rem 0; font-size: 0.85rem;"></p>
+    <div class="cards" id="savingsCards"></div>
+    <table class="comparison-table" id="comparisonTable">
+      <thead>
+        <tr>
+          <th>Configuration</th>
+          <th>Tokens</th>
+          <th>LLM Calls</th>
+          <th>Latency / query</th>
+          <th>Cost</th>
+          <th>Quality</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
   <div class="charts">
     <div class="panel"><canvas id="tokensChart"></canvas></div>
     <div class="panel"><canvas id="latencyChart"></canvas></div>
@@ -80,6 +113,68 @@
       });
     }
 
+    function pct(value, baseline) {
+      if (!baseline) return 'N/A';
+      return (value / baseline * 100).toFixed(1) + '%';
+    }
+
+    function renderComparison(comp) {
+      if (!comp || !comp.baseline || !comp.combined) return;
+      document.getElementById('comparisonPanel').style.display = 'block';
+      const note = document.getElementById('comparisonNote');
+      note.textContent = comp.models_note || '';
+
+      const sav = comp.savings_vs_baseline || {};
+      document.getElementById('savingsCards').innerHTML = [
+        ['Token usage', sav.tokens_pct != null ? sav.tokens_pct.toFixed(1) + '% less' : '—'],
+        ['Cost usage', sav.cost_pct != null ? sav.cost_pct.toFixed(1) + '% less' : '—'],
+        ['Latency', sav.latency_pct != null ? sav.latency_pct.toFixed(1) + '% less' : '—'],
+        ['Quality (judge)', (comp.quality_pct != null ? comp.quality_pct : 100).toFixed(1) + '%'],
+      ].map(([label, value]) => `
+        <div class="card">
+          <div class="label">${label}</div>
+          <div class="value positive">${value}</div>
+        </div>
+      `).join('');
+
+      const b = comp.baseline;
+      const c = comp.combined;
+      const q = comp.quality_pct != null ? comp.quality_pct : 100;
+      const tbody = document.querySelector('#comparisonTable tbody');
+      tbody.innerHTML = [
+        {
+          name: 'baseline',
+          tokens: b.total_tokens,
+          llm: `${b.llm_calls}/${b.total_questions}`,
+          lat: b.avg_latency_ms,
+          cost: b.estimated_cost_usd,
+          quality: 100,
+          rel: true,
+        },
+        {
+          name: 'combined',
+          tokens: c.total_tokens,
+          llm: `${c.llm_calls}/${c.total_questions}`,
+          lat: c.avg_latency_ms,
+          cost: c.estimated_cost_usd,
+          quality: q,
+          rel: false,
+        },
+      ].map(row => {
+        const tokenCell = row.rel ? '100.0%' : pct(row.tokens, b.total_tokens);
+        const latCell = row.rel ? '100.0%' : pct(row.lat, b.avg_latency_ms);
+        const costCell = row.rel ? '100.0%' : pct(row.cost, b.estimated_cost_usd);
+        return `<tr>
+          <td>${row.name}</td>
+          <td>${tokenCell}</td>
+          <td>${row.llm}</td>
+          <td>${latCell}</td>
+          <td>${costCell}</td>
+          <td>${row.quality.toFixed(1)}%</td>
+        </tr>`;
+      }).join('');
+    }
+
     function renderCacheTable(audit) {
       const tbody = document.querySelector('#cacheTable tbody');
       tbody.innerHTML = (audit.thresholds || []).map(row => `
@@ -98,8 +193,11 @@
         try { judge = await loadJson('/dashboard/data/judge_latest.json'); } catch (_) {}
         let audit = null;
         try { audit = await loadJson('/dashboard/data/cache_audit.json'); } catch (_) {}
+        let comparison = null;
+        try { comparison = await loadJson('/dashboard/data/comparison.json'); } catch (_) {}
 
         renderCards(latest, judge);
+        renderComparison(comparison);
         renderCharts(latest);
         if (audit) renderCacheTable(audit);
       } catch (err) {

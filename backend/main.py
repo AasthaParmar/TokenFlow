@@ -108,7 +108,7 @@ def dashboard():
 
 @app.get("/dashboard/data/{name}")
 def dashboard_data(name: str):
-    allowed = {"latest.json", "judge_latest.json", "cache_audit.json"}
+    allowed = {"latest.json", "judge_latest.json", "cache_audit.json", "comparison.json"}
     if name not in allowed:
         raise HTTPException(status_code=404, detail="Unknown data file")
     path = Path("evaluation/results") / name
