@@ -1,6 +1,38 @@
 from collections import Counter
 
-from evaluation.generate_dataset import CATEGORY_RATIOS, build_dataset, factual_cs_slot_count
+from evaluation.generate_dataset import (
+    CATEGORY_RATIOS,
+    build_dataset,
+    factual_cs_slot_count,
+)
+
+
+def test_unique_question_strings_at_1000():
+    dataset = build_dataset(1000)
+    questions = [x["question"] for x in dataset]
+    assert len(questions) == len(set(questions))
+    cache_pairs = [x for x in dataset if x["category"] == "cache_pair"]
+    assert len(cache_pairs) == 150
+    for pair in cache_pairs:
+        base = next(x for x in dataset if x["id"] == pair["similar_to_id"])
+        assert pair["question"] != base["question"]
+
+
+def test_distinct_concepts_at_1000():
+    dataset = build_dataset(1000)
+    refs = {x["reference_answer"] for x in dataset}
+    assert len(refs) >= 280
+    factual = [x for x in dataset if x["category"] == "factual"]
+    assert len({x["reference_answer"] for x in factual}) >= 230
+    assert max(Counter(x["reference_answer"] for x in dataset).values()) <= 5
+
+
+def test_balanced_category_mix_at_1000():
+    dataset = build_dataset(1000)
+    counts = Counter(item["category"] for item in dataset)
+    assert sum(counts.values()) == 1000
+    for category, ratio in CATEGORY_RATIOS.items():
+        assert abs(counts[category] - int(1000 * ratio)) <= 2
 
 
 def test_balanced_category_mix_at_500():

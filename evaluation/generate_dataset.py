@@ -2,9 +2,17 @@
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 
-DEFAULT_DATASET_SIZE = 500
+from evaluation.dataset_pools_extra import (
+    FACTUAL_CS_EXTRA,
+    FACTUAL_GENERAL_EXTRA,
+    RAG_QA_EXTRA,
+    REASONING_EXTRA,
+)
+
+DEFAULT_DATASET_SIZE = 1000
 
 # Of the factual slice at size 500 (175 items): 60 CS + 115 general; scales with --size
 FACTUAL_CS_SLOTS_AT_500 = 60
@@ -28,7 +36,7 @@ FACTUAL_CS = [
     ("What is a vector embedding?", "An embedding is a numeric vector representation of text that captures semantic meaning."),
     ("What is tokenization?", "Tokenization splits text into tokens, the units models process for billing and inference."),
     ("What is RAG?", "RAG retrieves external documents at query time to ground model answers in relevant context."),
-]
+] + FACTUAL_CS_EXTRA
 
 FACTUAL_GENERAL = [
     ("What is the capital of France?", "The capital of France is Paris."),
@@ -71,7 +79,7 @@ FACTUAL_GENERAL = [
     ("What is renewable energy?", "Renewable energy comes from sources that replenish naturally, such as solar and wind."),
     ("What is the Nobel Prize?", "The Nobel Prize recognizes outstanding contributions in fields such as physics, chemistry, medicine, literature, and peace."),
     ("What is the Great Wall of China?", "The Great Wall of China is a historic series of fortifications built to protect Chinese states."),
-]
+] + FACTUAL_GENERAL_EXTRA
 
 FACTUAL = FACTUAL_CS + FACTUAL_GENERAL
 
@@ -96,7 +104,7 @@ REASONING = [
     ("How do you decide whether to rent or buy a home?", "Compare monthly costs, how long you will stay, maintenance, flexibility, and local market conditions."),
     ("Why can identical recipes taste different at altitude?", "Lower air pressure changes boiling points and evaporation, affecting baking and cooking times."),
     ("Why is sample size important in surveys?", "Larger, representative samples reduce random error and make estimates more reliable."),
-]
+] + REASONING_EXTRA
 
 # Unique RAG scenarios (20 chunks each, one relevant index) — not cloned variants
 RAG_SCENARIOS = [
@@ -418,7 +426,7 @@ RAG_QA_LINES = [
     ("How many questions are in the balanced evaluation mix?", "The evaluation dataset mixes factual, reasoning, RAG, and cache-pair categories."),
     ("What similarity thresholds does cache audit test?", "Cache audit sweeps thresholds 0.80, 0.90, 0.95, and 0.98."),
     ("What does combined benchmark mode enable?", "Combined mode enables cache, RAG chunk selection, and model routing together."),
-]
+] + RAG_QA_EXTRA
 
 CACHE_PARAPHRASES = [
     "Can you explain: {q}",
@@ -426,6 +434,22 @@ CACHE_PARAPHRASES = [
     "Please clarify — {q}",
     "I'd like to know: {q}",
     "Could you help me understand {q}",
+]
+
+# Wording variants for scaling pools — not used for cache_pair (those use CACHE_PARAPHRASES).
+NON_CACHE_VARIANTS = [
+    "{q}",
+    "Briefly answer: {q}",
+    "In your own words, {q}",
+    "For study purposes: {q}",
+    "Core knowledge check — {q}",
+    "Explain clearly: {q}",
+    "One-paragraph answer to: {q}",
+    "Key fact: what is {base}?",
+    "Background topic: {q}",
+    "Concept review: {q}",
+    "Short explanation needed: {q}",
+    "Define and illustrate: {q}",
 ]
 
 
@@ -457,26 +481,65 @@ def build_extended_rag_scenarios() -> list[dict]:
 ALL_RAG_SCENARIOS = build_extended_rag_scenarios()
 
 
-def expand_qa_pool(pool: list[tuple[str, str]], count: int) -> list[tuple[str, str]]:
-    """Return count question/answer pairs with unique question wording when pool repeats."""
+def _base_phrase(question: str) -> str:
+    return question.rstrip("?").strip()
+
+
+def next_unique_question(canonical_q: str, seen: set[str]) -> str:
+    """Assign a unique question string; never uses cache-paraphrase templates."""
+    base = _base_phrase(canonical_q)
+    q = f"{base}?"
+    for variant_idx in range(500):
+        for tmpl in NON_CACHE_VARIANTS:
+            if "{base}" in tmpl:
+                candidate = tmpl.format(base=base)
+            else:
+                candidate = tmpl.format(q=q)
+            if not candidate.endswith("?"):
+                candidate = f"{candidate}?"
+            if variant_idx > 0:
+                candidate = f"{candidate.rstrip('?')} (variant {variant_idx + 1})?"
+            if candidate not in seen:
+                return candidate
+    raise RuntimeError(f"Could not allocate unique question for: {canonical_q!r}")
+
+
+def expand_qa_pool(
+    pool: list[tuple[str, str]], count: int, seen: set[str]
+) -> list[tuple[str, str]]:
+    """Return count pairs; unique question strings; prefer unused reference answers."""
     if count <= 0:
         return []
-    seen: set[str] = set()
+    if not pool:
+        raise ValueError("expand_qa_pool requires a non-empty pool")
+    ref_use: Counter[str] = Counter()
     out: list[tuple[str, str]] = []
-    i = 0
+    cursor = 0
     while len(out) < count:
-        q, ref = pool[i % len(pool)]
-        i += 1
-        candidate = q
-        if candidate in seen:
-            candidate = CACHE_PARAPHRASES[len(out) % len(CACHE_PARAPHRASES)].format(
-                q=q.rstrip("?") + "?"
-            )
-        if candidate in seen:
-            candidate = f"{q.rstrip('?')} — could you explain?"
+        best_idx = min(
+            range(len(pool)),
+            key=lambda j: (ref_use[pool[j][1]], (cursor + j) % len(pool)),
+        )
+        q, ref = pool[best_idx]
+        ref_use[ref] += 1
+        cursor = (best_idx + 1) % len(pool)
+        candidate = next_unique_question(q, seen)
         seen.add(candidate)
         out.append((candidate, ref))
     return out
+
+
+def unique_cache_paraphrase(base_q: str, template: str, seen: set[str], pair_index: int) -> str:
+    """Paraphrase for cache_pair — similar to base, unique string, uses cache templates."""
+    core = base_q.rstrip("?") + "?"
+    candidate = template.format(q=core)
+    if candidate in seen:
+        candidate = template.format(q=core.rstrip("?") + f" (follow-up {pair_index + 1})?")
+    suffix = 0
+    while candidate in seen:
+        suffix += 1
+        candidate = f"{template.format(q=core).rstrip('?')} (alt {suffix})?"
+    return candidate
 
 
 def make_item(
@@ -503,8 +566,8 @@ def factual_cs_slot_count(factual_total: int) -> int:
     """CS factual count scales with dataset size; 60 when factual_total is 175 (size 500)."""
     if factual_total <= 0:
         return 0
-    at_500 = int(DEFAULT_DATASET_SIZE * CATEGORY_RATIOS["factual"])
-    ratio = FACTUAL_CS_SLOTS_AT_500 / at_500
+    factual_at_500 = int(500 * CATEGORY_RATIOS["factual"])
+    ratio = FACTUAL_CS_SLOTS_AT_500 / factual_at_500
     cs = round(factual_total * ratio)
     return min(factual_total, max(1, cs))
 
@@ -514,23 +577,26 @@ def build_dataset(target_size: int = DEFAULT_DATASET_SIZE) -> list[dict]:
     counts = allocate_counts(target_size)
     items: list[dict] = []
     item_id = 1
+    used_questions: set[str] = set()
 
     cs_n = factual_cs_slot_count(counts["factual"])
     gen_n = counts["factual"] - cs_n
-    factual_rows = expand_qa_pool(FACTUAL_CS, cs_n) + expand_qa_pool(FACTUAL_GENERAL, gen_n)
+    factual_rows = expand_qa_pool(FACTUAL_CS, cs_n, used_questions) + expand_qa_pool(
+        FACTUAL_GENERAL, gen_n, used_questions
+    )
     factual_ids: list[int] = []
     for q, ref in factual_rows:
         items.append(make_item(item_id, q, ref, "factual"))
         factual_ids.append(item_id)
         item_id += 1
 
-    for q, ref in expand_qa_pool(REASONING, counts["reasoning"]):
+    for q, ref in expand_qa_pool(REASONING, counts["reasoning"], used_questions):
         items.append(make_item(item_id, q, ref, "reasoning"))
         item_id += 1
 
     rag_pool = [(r["question"], r["answer"]) for r in ALL_RAG_SCENARIOS]
     rag_by_answer = {r["answer"]: r for r in ALL_RAG_SCENARIOS}
-    for q, ref in expand_qa_pool(rag_pool, counts["rag"]):
+    for q, ref in expand_qa_pool(rag_pool, counts["rag"], used_questions):
         scenario = rag_by_answer[ref]
         items.append(
             make_item(
@@ -549,7 +615,8 @@ def build_dataset(target_size: int = DEFAULT_DATASET_SIZE) -> list[dict]:
         base_id = factual_ids[base_idx]
         base_q, base_ref = factual_rows[base_idx]
         template = CACHE_PARAPHRASES[i % len(CACHE_PARAPHRASES)]
-        paraphrase = template.format(q=base_q.rstrip("?") + "?")
+        paraphrase = unique_cache_paraphrase(base_q, template, used_questions, i)
+        used_questions.add(paraphrase)
         items.append(
             make_item(
                 item_id,
