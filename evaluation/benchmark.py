@@ -11,6 +11,7 @@ from pathlib import Path
 from backend.gateway.pipeline import GatewayPipeline, PipelineConfig
 from backend.schemas import ChatRequest
 from database.models import clear_cache
+from evaluation.comparison import write_comparison_json
 from evaluation.splits import ensure_splits, load_dataset, load_splits
 
 
@@ -47,11 +48,15 @@ def estimate_cost(input_tokens: int, output_tokens: int) -> float:
     )
 
 
+DEFAULT_REQUEST_DELAY_SEC = 2.0
+
+
 def run_benchmark(
     mode: str,
     split: str = "dev",
     limit: int | None = None,
     clear_cache_first: bool = False,
+    request_delay: float = DEFAULT_REQUEST_DELAY_SEC,
 ) -> RunSummary:
     if mode not in MODES:
         raise ValueError(f"Unknown mode: {mode}")
@@ -77,12 +82,13 @@ def run_benchmark(
     total_latency = 0.0
     llm_calls = cache_hits = 0
 
-    for item in items:
+    for n, item in enumerate(items, start=1):
         request = ChatRequest(
             message=item["question"],
             context_chunks=item.get("context_chunks", []),
             relevant_chunk_ids=item.get("relevant_chunk_ids") or None,
         )
+        print(f"[{n}/{len(items)}] {item['question'][:60]}...", flush=True)
         start = time.perf_counter()
         response = pipeline.run(request, cfg)
         elapsed = (time.perf_counter() - start) * 1000
@@ -110,7 +116,8 @@ def run_benchmark(
                 "model": response.model,
             }
         )
-        time.sleep(0.1)
+        if n < len(items):
+            time.sleep(request_delay)
 
     summary = RunSummary(
         mode=mode,
@@ -145,6 +152,9 @@ def run_benchmark(
         f"tokens={total_in + total_out}, llm_calls={llm_calls}, "
         f"cache_hits={cache_hits}, cost=${summary.estimated_cost_usd:.4f}"
     )
+    if split == "test":
+        if write_comparison_json(out_dir):
+            print(f"Updated {out_dir / 'comparison.json'}")
     return summary
 
 
@@ -154,8 +164,20 @@ def main() -> None:
     parser.add_argument("--split", choices=["dev", "test"], default="dev")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--clear-cache", action="store_true")
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=DEFAULT_REQUEST_DELAY_SEC,
+        help="Seconds between questions (free-tier RPM; try 15–20 if you see 429/503)",
+    )
     args = parser.parse_args()
-    run_benchmark(args.mode, args.split, args.limit, args.clear_cache)
+    run_benchmark(
+        args.mode,
+        args.split,
+        args.limit,
+        args.clear_cache,
+        request_delay=args.delay,
+    )
 
 
 if __name__ == "__main__":

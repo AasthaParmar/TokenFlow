@@ -4,7 +4,10 @@ import argparse
 import json
 import random
 import re
+import time
 from pathlib import Path
+
+DEFAULT_JUDGE_DELAY_SEC = 1.0
 
 from backend.llm.gemini import GeminiClient
 
@@ -47,7 +50,13 @@ def overall_score(scores: dict) -> float:
     return round(total / max_score * 100, 2)
 
 
-def judge_results(results_path: str, sample_size: int | None = None, seed: int = 42) -> dict:
+def judge_results(
+    results_path: str,
+    sample_size: int | None = None,
+    seed: int = 42,
+    request_delay: float = DEFAULT_JUDGE_DELAY_SEC,
+    write_latest: bool = True,
+) -> dict:
     with open(results_path, encoding="utf-8") as f:
         payload = json.load(f)
 
@@ -59,7 +68,8 @@ def judge_results(results_path: str, sample_size: int | None = None, seed: int =
 
     client = GeminiClient()
     judged = []
-    for item in results:
+    for n, item in enumerate(results, start=1):
+        print(f"Judge [{n}/{len(results)}] id={item['id']}", flush=True)
         prompt = JUDGE_PROMPT.format(
             question=item["question"],
             reference=item["reference_answer"],
@@ -75,6 +85,8 @@ def judge_results(results_path: str, sample_size: int | None = None, seed: int =
                 "overall_pct": overall_score(scores),
             }
         )
+        if n < len(results):
+            time.sleep(request_delay)
 
     avg_correctness = sum(j["scores"]["correctness"] for j in judged) / len(judged)
     avg_completeness = sum(j["scores"]["completeness"] for j in judged) / len(judged)
@@ -93,8 +105,9 @@ def judge_results(results_path: str, sample_size: int | None = None, seed: int =
 
     out_path = Path("evaluation/results") / "judge_latest.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2)
+    if write_latest:
+        with out_path.open("w", encoding="utf-8") as f:
+            json.dump(output, f, indent=2)
 
     if sample_size is not None:
         manual_path = Path("evaluation/results") / "manual_validation_sample.json"
@@ -116,16 +129,29 @@ def main() -> None:
     parser.add_argument("--results", default="evaluation/results/latest.json")
     parser.add_argument("--sample", type=int, default=None)
     parser.add_argument("--manual-sample", type=int, default=20)
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=DEFAULT_JUDGE_DELAY_SEC,
+        help="Seconds between judge API calls",
+    )
     args = parser.parse_args()
 
     if args.sample:
-        judge_results(args.results, sample_size=args.sample, seed=42)
+        judge_results(
+            args.results,
+            sample_size=args.sample,
+            seed=42,
+            request_delay=args.delay,
+        )
     else:
-        judge_results(args.results)
+        judge_results(args.results, request_delay=args.delay)
         judge_results(
             args.results,
             sample_size=args.manual_sample,
             seed=42,
+            request_delay=args.delay,
+            write_latest=False,
         )
 
 

@@ -4,14 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
+from evaluation.comparison import latest_by_mode, load_test_results, write_comparison_json
+
 
 def load_result_files(results_dir: Path) -> list[dict]:
-    files = sorted(results_dir.glob("*_test.json"))
-    payloads = []
-    for path in files:
-        with path.open(encoding="utf-8") as f:
-            payloads.append(json.load(f))
-    return payloads
+    payloads = load_test_results(results_dir)
+    by_mode = latest_by_mode(payloads)
+    return list(by_mode.values()) if by_mode else payloads
 
 
 def pct(value: float, baseline: float) -> str:
@@ -92,6 +91,8 @@ def generate_report(results_dir: str = "evaluation/results") -> str:
                 f"{pct(latency, b_latency)},{pct(p['estimated_cost_usd'], b_cost)},"
                 f"{quality:.1f}\n"
             )
+
+    write_comparison_json(dir_path)
 
     print(report)
     print(f"\nSaved {out_md} and {out_csv}")

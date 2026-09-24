@@ -2,9 +2,12 @@ import time
 from dataclasses import dataclass
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
 from backend.config import settings
+
+_RETRYABLE = (genai_errors.ServerError, genai_errors.ClientError)
 
 
 @dataclass
@@ -23,6 +26,24 @@ class GeminiClient:
             raise ValueError("GEMINI_API_KEY is required")
         self.client = genai.Client(api_key=key)
 
+    def _call_with_retry(self, fn, max_attempts: int = 10):
+        last_exc = None
+        for attempt in range(max_attempts):
+            try:
+                return fn()
+            except _RETRYABLE as exc:
+                last_exc = exc
+                if attempt + 1 >= max_attempts:
+                    raise
+                wait = min(120, 8 * (2**attempt))
+                print(
+                    f"Gemini API retry {attempt + 1}/{max_attempts} in {wait}s "
+                    f"({getattr(exc, 'code', None) or type(exc).__name__})",
+                    flush=True,
+                )
+                time.sleep(wait)
+        raise last_exc  # pragma: no cover
+
     def generate(
         self,
         message: str,
@@ -36,11 +57,15 @@ class GeminiClient:
             prompt = f"Context:\n{context}\n\nQuestion: {message}"
 
         start = time.perf_counter()
-        response = self.client.models.generate_content(
-            model=model_name,
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=temperature),
-        )
+
+        def _do_generate():
+            return self.client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=temperature),
+            )
+
+        response = self._call_with_retry(_do_generate)
         latency_ms = (time.perf_counter() - start) * 1000
 
         usage = response.usage_metadata
@@ -56,16 +81,22 @@ class GeminiClient:
         )
 
     def embed(self, text: str) -> list[float]:
-        result = self.client.models.embed_content(
-            model=settings.gemini_embedding_model,
-            contents=text,
-        )
+        def _do_embed():
+            return self.client.models.embed_content(
+                model=settings.gemini_embedding_model,
+                contents=text,
+            )
+
+        result = self._call_with_retry(_do_embed)
         return list(result.embeddings[0].values)
 
     def judge(self, prompt: str) -> str:
-        response = self.client.models.generate_content(
-            model=settings.gemini_model_large,
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=0),
-        )
+        def _do_judge():
+            return self.client.models.generate_content(
+                model=settings.gemini_model_large,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0),
+            )
+
+        response = self._call_with_retry(_do_judge)
         return response.text or ""
