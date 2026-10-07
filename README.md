@@ -20,6 +20,24 @@ flowchart TD
     Log --> ReturnAnswer[ReturnAnswer]
 ```
 
+## Screenshots
+
+**Benchmark dashboard** (`/dashboard`) — baseline vs combined on the 200-question held-out test set:
+
+![TokenFlow dashboard overview](docs/images/dashboard-overview.png)
+
+Token usage, LLM calls vs cache hits:
+
+![Dashboard charts](docs/images/dashboard-charts.png)
+
+**Cache threshold sweep** (dev set) — tradeoff between hit rate and correct hits:
+
+![Cache threshold sweep](docs/images/cache-threshold-sweep.png)
+
+**Chat UI** (`/chat-ui`) — baseline or optimized mode, optional RAG context sidebar:
+
+![TokenFlow chat UI](docs/images/chat-ui.png)
+
 ## Quick start
 
 ### 1. Install dependencies
@@ -165,13 +183,17 @@ Judge validated on 20 randomly sampled dev questions (`evaluation/results/manual
 
 ## Results
 
-After running benchmarks on the **held-out test set** (30 questions), see:
+Example numbers from the **200-question test split** (combined mode vs baseline):
 
-- `evaluation/results/REPORT.md`
-- `evaluation/results/REPORT.csv`
-- Dashboard at `http://localhost:8000/dashboard`
+| Metric | Combined vs baseline |
+|--------|----------------------|
+| Token usage | 26.8% less |
+| Cost | 22.5% less |
+| Latency | 50.7% less |
+| Quality (LLM judge) | 97.7% |
+| Cache hit rate (test) | 2.5% (195/200 LLM calls) |
 
-Add a short results table and screenshots to this README once you have final numbers (dashboard, report table, optional cache audit). Raw JSON under `evaluation/results/` stays local (gitignored).
+See also `evaluation/results/REPORT.md`, `evaluation/results/REPORT.csv`, and **http://localhost:8000/dashboard** after you run benchmarks. Raw JSON under `evaluation/results/` stays local (gitignored).
 
 ## Tests
 
@@ -184,9 +206,11 @@ pytest
 ```text
 TokenFlow/
 ├── backend/          # FastAPI gateway, cache, RAG, router
-├── database/         # Postgres + pgvector schema
-├── evaluation/       # Dataset, benchmarks, judge, report
+├── chat/             # Browser chat UI
 ├── dashboard/        # Results visualization
+├── database/         # Postgres + pgvector schema
+├── docs/images/      # README screenshots
+├── evaluation/       # Dataset, benchmarks, judge, report
 ├── tests/            # Unit tests
 └── docker-compose.yml
 ```
