@@ -7,7 +7,7 @@ from pathlib import Path
 
 from backend.cache.semantic import SemanticCache
 from backend.config import settings
-from backend.llm.gemini import GeminiClient
+from backend.llm.factory import create_llm_client
 from database.models import clear_cache
 from evaluation.splits import ensure_splits, load_dataset, load_splits
 
@@ -40,7 +40,7 @@ def run_audit(
     if limit:
         cache_pairs = cache_pairs[:limit]
 
-    client = GeminiClient()
+    client = create_llm_client()
     cache = SemanticCache(client)
     report = {"thresholds": [], "split": split}
 
@@ -59,7 +59,7 @@ def run_audit(
             continue
         seeded_questions.add(item["question"])
         base_items.append(item)
-    model = settings.gemini_model_small
+    model = settings.active_model_small
     print(
         f"Seeding cache with {len(base_items)} unique base questions "
         f"({len(base_ids)} cache-pair links, LLM via {model})..."

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from backend.cache.semantic import SemanticCache
 from backend.config import settings
-from backend.llm.gemini import GeminiClient
+from backend.llm.factory import create_llm_client
 from backend.logging.metrics import log_request
 from backend.rag.selector import RAGSelector
 from backend.router.complexity import route
@@ -25,8 +25,8 @@ def get_config_flags(cfg: PipelineConfig) -> dict[str, bool]:
 
 
 class GatewayPipeline:
-    def __init__(self, client: GeminiClient | None = None):
-        self.client = client or GeminiClient()
+    def __init__(self, client=None):
+        self.client = client or create_llm_client()
         self.cache = SemanticCache(self.client)
         self.rag = RAGSelector(self.client)
 
@@ -37,7 +37,7 @@ class GatewayPipeline:
         selected_chunks = request.context_chunks
         recall = None
         complexity_score = None
-        model = settings.gemini_model_large
+        model = settings.active_model_large
 
         if not cfg.enable_rag_selection and request.context_chunks:
             selected_chunks = request.context_chunks
@@ -77,7 +77,12 @@ class GatewayPipeline:
 
         # Step 3: Model routing
         if cfg.enable_routing:
-            decision = route(request.message, num_chunks=chunks_kept)
+            decision = route(
+                request.message,
+                num_chunks=chunks_kept,
+                small_model=settings.active_model_small,
+                large_model=settings.active_model_large,
+            )
             model = decision.model
             complexity_score = decision.complexity_score
 

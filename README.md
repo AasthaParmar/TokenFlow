@@ -1,6 +1,6 @@
 # TokenFlow
 
-An LLM efficiency gateway that sits between your app and Gemini. It reduces token usage and cost through **semantic caching**, **smart RAG context selection**, and **model routing** — while measuring the quality tradeoff.
+An LLM efficiency gateway that sits between your app and an LLM provider. It reduces token usage and cost through **semantic caching**, **smart RAG context selection**, and **model routing** — while measuring the quality tradeoff.
 
 ## Architecture
 
@@ -53,6 +53,7 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 # Add your GEMINI_API_KEY to .env
+# Optionally set LLM_PROVIDER=claude and add CLAUDE_API_KEY
 ```
 
 Get a key at [Google AI Studio](https://aistudio.google.com/apikey).
@@ -80,6 +81,8 @@ uvicorn backend.main:app --reload --port 8000
 ```
 
 Open **http://localhost:8000/chat-ui** to try questions in the browser (optional RAG context chunks in the sidebar).
+
+TokenFlow uses Gemini by default. Set `LLM_PROVIDER=claude` if you want Claude for generation without needing a Gemini key; Claude mode uses a local embedding fallback for cache and RAG.
 
 ### 6. Health check
 

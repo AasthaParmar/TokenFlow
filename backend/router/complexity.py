@@ -43,10 +43,16 @@ def score_complexity(message: str, num_chunks: int = 0) -> float:
     return score
 
 
-def route(message: str, num_chunks: int = 0, threshold: float = 2.5) -> RoutingDecision:
+def route(
+    message: str,
+    num_chunks: int = 0,
+    threshold: float = 2.5,
+    small_model: str | None = None,
+    large_model: str | None = None,
+) -> RoutingDecision:
     complexity = score_complexity(message, num_chunks)
     if complexity >= threshold:
-        model = settings.gemini_model_large
+        model = large_model or settings.active_model_large
     else:
-        model = settings.gemini_model_small
+        model = small_model or settings.active_model_small
     return RoutingDecision(model=model, complexity_score=complexity)

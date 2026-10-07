@@ -59,13 +59,18 @@ def health():
 @app.get("/config")
 def config():
     return {
+        "llm_provider": settings.llm_provider,
         "enable_cache": settings.enable_cache,
         "enable_rag_selection": settings.enable_rag_selection,
         "enable_routing": settings.enable_routing,
         "cache_similarity_threshold": settings.cache_similarity_threshold,
         "rag_top_k": settings.rag_top_k,
-        "model_small": settings.gemini_model_small,
-        "model_large": settings.gemini_model_large,
+        "model_small": settings.active_model_small,
+        "model_large": settings.active_model_large,
+        "gemini_model_small": settings.gemini_model_small,
+        "gemini_model_large": settings.gemini_model_large,
+        "claude_model_small": settings.claude_model_small,
+        "claude_model_large": settings.claude_model_large,
     }
 
 
@@ -85,7 +90,7 @@ def chat(request: ChatRequest):
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Gemini API error: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"LLM API error: {exc}") from exc
 
 
 @app.post("/chat/optimized", response_model=ChatResponse)
@@ -95,7 +100,7 @@ def chat_optimized(request: ChatRequest):
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Gemini API error: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"LLM API error: {exc}") from exc
 
 
 @app.get("/chat-ui")

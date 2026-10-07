@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from backend.config import settings
-from backend.llm.gemini import GeminiClient
+from backend.llm.base import EmbeddingClient
 from database.models import find_similar_cache, insert_cache_entry
 
 
@@ -14,7 +14,7 @@ class CacheResult:
 
 
 class SemanticCache:
-    def __init__(self, client: GeminiClient):
+    def __init__(self, client: EmbeddingClient):
         self.client = client
         self.threshold = settings.cache_similarity_threshold
 

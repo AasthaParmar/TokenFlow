@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from backend.config import settings
-from backend.llm.gemini import GeminiClient
+from backend.llm.base import EmbeddingClient
 
 
 @dataclass
@@ -23,7 +23,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 class RAGSelector:
-    def __init__(self, client: GeminiClient):
+    def __init__(self, client: EmbeddingClient):
         self.client = client
         self.top_k = settings.rag_top_k
 

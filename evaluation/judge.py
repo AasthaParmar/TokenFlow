@@ -9,7 +9,7 @@ from pathlib import Path
 
 DEFAULT_JUDGE_DELAY_SEC = 1.0
 
-from backend.llm.gemini import GeminiClient
+from backend.llm.factory import create_llm_client
 
 JUDGE_PROMPT = """You are an evaluation judge. Score the candidate answer against the reference answer.
 
@@ -66,7 +66,7 @@ def judge_results(
         rng = random.Random(seed)
         results = rng.sample(results, k)
 
-    client = GeminiClient()
+    client = create_llm_client()
     judged = []
     for n, item in enumerate(results, start=1):
         print(f"Judge [{n}/{len(results)}] id={item['id']}", flush=True)
